@@ -11,33 +11,39 @@ const io = new Server(server, {
 });
 
 io.on('connection', (socket) => {
-    console.log('✅ Kiosk Connected to Bridge. ID:', socket.id);
+    console.log('✅ Kiosk Connected. ID:', socket.id);
 });
 
 app.post('/vapi-webhook', async (req, res) => {
     const payload = req.body;
+    
+    // Check if this is a tool call
     if (payload.message && payload.message.type === "tool-calls") {
         const toolCall = payload.message.toolCalls[0];
+        
         if (toolCall.function.name === "updateKioskDisplay") {
-            const args = JSON.parse(toolCall.function.arguments);
-            console.log("🚀 AI Triggered UI Change:", args.viewType);
-            io.emit('COMMAND_UPDATE_UI', {
-                viewType: args.viewType,
-                tourName: args.tourName || "Dubai Attraction",
-                qrUrl: args.qrUrl || "https://visitdubai.com"
-            });
+            // Fix: Vapi sometimes sends arguments as an object already
+            let args = toolCall.function.arguments;
+            if (typeof args === 'string') {
+                try { args = JSON.parse(args); } catch (e) { console.error("Parse error"); }
+            }
+
+            console.log("🚀 Triggering UI:", args.viewType || "Default");
+
+            // Send to Android Kiosk
+            io.emit('COMMAND_UPDATE_UI', args);
+
+            // Respond to Vapi immediately to stop the "No Result" error
             return res.status(201).json({
                 results: [{
                     toolCallId: toolCall.id,
-                    result: "Display successfully updated on the kiosk screen."
+                    result: "Display updated."
                 }]
             });
         }
     }
-    res.status(200).send("Event acknowledged.");
+    res.status(200).send("OK");
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`🚀 Dubai Kiosk Bridge running on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`🚀 Bridge running on port ${PORT}`));
