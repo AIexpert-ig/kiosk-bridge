@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Travel Expert ™ | The AI Concierge</title>
+
+    <script src='https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/dist/vapi.browser.js'></script>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+    
+
+    <style>
+
+        :root { --gold: #D4AF37; --black: #0a0a0a; }
+
+        body { background: var(--black); color: white; font-family: 'Helvetica Neue', sans-serif; margin: 0; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+
+        #screen { width: 90%; height: 70vh; border: 2px solid var(--gold); border-radius: 20px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 20px; transition: all 0.5s ease; }
+
+        .qr-card { background: white; padding: 20px; border-radius: 15px; color: black; }
+
+        #vapi-btn { margin-top: 30px; padding: 20px 60px; font-size: 1.5rem; background: var(--gold); border: none; border-radius: 50px; cursor: pointer; font-weight: bold; text-transform: uppercase; }
+
+        #status { margin-top: 10px; color: var(--gold); font-size: 0.9rem; }
+
+    </style>
+
+</head>
+
+<body>
+
+
+
+    <div id="screen">
+
+        <div id="content">
+
+            <h1 style="color: var(--gold);">TRAVEL EXPERT ™</h1>
+
+            <p>Dubai's Premier AI Concierge is Ready.</p>
+
+        </div>
+
+    </div>
+
+
+
+    <button id="vapi-btn">Talk to Concierge</button>
+
+    <div id="status">System Online | Ready for Voice</div>
+
+
+
+    <script>
+
+        // --- LISTEN FOR VIBE CHANGES ---
+socket.on("COMMAND_UPDATE_UI", (data) => {
+    console.log("UI Update Received:", data);
+    const body = document.body;
+    const screen = document.getElementById('content');
+
+    // CHANGE THE VIBE (Background Colors)
+    if (data.vibe === "rain") {
+        body.style.background = "linear-gradient(180deg, #001f3f, #000000)"; // Deep Rain Blue
+    } else if (data.vibe === "luxury") {
+        body.style.background = "linear-gradient(180deg, #1a1a1a, #4d3d0d)"; // Luxury Gold Glow
+    } else if (data.vibe === "adventure") {
+        body.style.background = "linear-gradient(180deg, #000000, #ff4b2b)"; // Adventure Red
+    }
+
+    // UPDATE CONTENT
+    if(data.viewType === "tour_details" || data.viewType === "booking_qr") {
+        screen.innerHTML = `
+            <div class="qr-card">
+                <h2 style="margin-top:0;">${data.tourName}</h2>
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${data.qrUrl}" alt="QR Code">
+                <p><b>Scan with phone to book</b></p>
+            </div>
+        `;
+    }
+});
+    </script>
+
+</body>
+
+</html>
