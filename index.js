@@ -1,6 +1,6 @@
 const express  = require('express');
 const http     = require('http');
-const https    = require('https'); // Required: Render's self-URL is https://
+const https    = require('https'); // FIX: keep-alive must use https for Render's https URL
 const { Server } = require('socket.io');
 
 const app = express();
@@ -15,34 +15,36 @@ const io = new Server(server, {
 });
 
 // ─────────────────────────────────────────────────────────────
-// KEEP-ALIVE  (FIXED — https module, hardcoded Render URL)
+// UPGRADE 1: Keep-Alive Self-Ping  (FIXED)
 //
-// Root cause of the crash:
-//   http.get() throws ERR_INVALID_PROTOCOL on https:// URLs.
-//   Render's RENDER_EXTERNAL_URL is always https://.
+// ROOT CAUSE OF CRASH:
+//   process.env.RENDER_EXTERNAL_URL is an https:// URL.
+//   The previous code used the `http` module to request it.
+//   Node's http.get() throws ERR_INVALID_PROTOCOL when given
+//   an https:// URL — you must use the `https` module instead.
 //
-// Fix:
-//   Use the `https` module. Hardcode the Render URL as a safe
-//   fallback so the server never tries to ping http://localhost
-//   in a production environment where that would fail silently.
+// FIX:
+//   Parse the URL. Route to `https` module if protocol is https:,
+//   fall back to `http` for local development (http://localhost:…).
 // ─────────────────────────────────────────────────────────────
-const RENDER_URL   = 'https://kiosk-bridge.onrender.com';
-const SELF_URL     = process.env.RENDER_EXTERNAL_URL || RENDER_URL;
-const PING_URL     = `${SELF_URL}/health`;
-const PING_INTERVAL = 10 * 60 * 1000; // 10 minutes
+const SELF_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${process.env.PORT || 3000}`;
+const KEEP_ALIVE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
 function keepAlivePing() {
-    // Always use https — Render does not serve plain http
-    https.get(PING_URL, (res) => {
-        res.resume(); // Consume body to release the socket
-        console.log(`💓 Keep-alive: ${res.statusCode} — ${new Date().toISOString()}`);
+    // Choose the correct module based on URL scheme
+    const requester = SELF_URL.startsWith('https') ? https : http;
+
+    requester.get(`${SELF_URL}/health`, (res) => {
+        console.log(`💓 Keep-alive ping: ${res.statusCode} — ${new Date().toISOString()}`);
+        // Consume response body to free the socket; if ignored, Node keeps it open
+        res.resume();
     }).on('error', (err) => {
-        // Log but never crash — a failed ping is not fatal
-        console.error(`❌ Keep-alive failed: ${err.message}`);
+        // Log but do NOT crash — a failed ping is not fatal
+        console.error(`❌ Keep-alive ping failed: ${err.message}`);
     });
 }
 
-setInterval(keepAlivePing, PING_INTERVAL);
+setInterval(keepAlivePing, KEEP_ALIVE_INTERVAL_MS);
 
 // ─────────────────────────────────────────────────────────────
 // SOCKET LIFECYCLE
@@ -51,22 +53,22 @@ let connectedKiosks = new Set();
 
 io.on('connection', (socket) => {
     connectedKiosks.add(socket.id);
-    console.log(`✅ Kiosk connected  | ID: ${socket.id} | Total: ${connectedKiosks.size}`);
+    console.log(`✅ Kiosk connected. ID: ${socket.id} | Total: ${connectedKiosks.size}`);
 
     socket.on('disconnect', (reason) => {
         connectedKiosks.delete(socket.id);
-        console.log(`🔌 Kiosk disconnected | ID: ${socket.id} | Reason: ${reason} | Remaining: ${connectedKiosks.size}`);
+        console.log(`🔌 Kiosk disconnected. ID: ${socket.id} | Reason: ${reason} | Remaining: ${connectedKiosks.size}`);
     });
 });
 
 // ─────────────────────────────────────────────────────────────
-// HEALTH
+// HEALTH CHECK
 // ─────────────────────────────────────────────────────────────
-app.get('/health', (_req, res) => {
+app.get('/health', (req, res) => {
     res.status(200).json({
         status:    'online',
         kiosks:    connectedKiosks.size,
-        uptime:    Math.floor(process.uptime()),
+        uptime:    process.uptime(),
         timestamp: new Date().toISOString(),
     });
 });
@@ -74,16 +76,20 @@ app.get('/health', (_req, res) => {
 // ─────────────────────────────────────────────────────────────
 // VAPI WEBHOOK
 //
-// Critical: Vapi times out tool calls in ~5 s.
-// Always send res.status(201) BEFORE emitting to the socket.
+// Critical constraint: Vapi has a ~5 s timeout on tool responses.
+// Rule: send res.status(201) FIRST, then emit to socket.
+// Never await the socket emit before responding to Vapi.
 // ─────────────────────────────────────────────────────────────
 app.post('/vapi-webhook', (req, res) => {
     const payload = req.body;
-    if (!payload?.message) return res.status(200).send('OK');
+
+    if (!payload?.message) {
+        return res.status(200).send('OK');
+    }
 
     const { type, toolCalls } = payload.message;
 
-    // AI state relay — forward speech events to the kiosk display
+    // Relay AI state transitions to the kiosk display
     if (type === 'speech-update') {
         const state = payload.message.role === 'assistant' ? 'THINKING' : 'LISTENING';
         io.emit('AI_STATE_UPDATE', { state });
@@ -107,20 +113,24 @@ app.post('/vapi-webhook', (req, res) => {
         });
     }
 
+    // Parse arguments — Vapi sometimes sends as string, sometimes as object
     let args = toolCall.function.arguments;
     if (typeof args === 'string') {
-        try { args = JSON.parse(args); }
-        catch (e) {
-            console.error('❌ Malformed tool arguments:', e.message);
+        try {
+            args = JSON.parse(args);
+        } catch (e) {
+            console.error('❌ Failed to parse tool arguments:', e.message);
             return res.status(201).json({
                 results: [{ toolCallId: toolCall.id, result: 'Display update failed: malformed arguments.' }]
             });
         }
     }
 
-    console.log(`🚀 UI trigger | viewType="${args.viewType}" | vibe="${args.vibe}" | kiosks=${connectedKiosks.size}`);
+    console.log(`🚀 UI trigger: viewType="${args.viewType || 'default'}" | vibe="${args.vibe || 'none'}" | kiosks=${connectedKiosks.size}`);
 
-    // Respond to Vapi FIRST — then emit. Never block the response.
+    // ── RESPOND TO VAPI FIRST — then emit to kiosk ──
+    // This is the most important latency pattern in the whole system.
+    // Vapi's clock is already ticking. Get the 201 out immediately.
     res.status(201).json({
         results: [{ toolCallId: toolCall.id, result: 'Display updated.' }]
     });
@@ -135,5 +145,5 @@ app.post('/vapi-webhook', (req, res) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`🚀 Bridge running on port ${PORT}`);
-    console.log(`💓 Keep-alive target: ${PING_URL}`);
+    console.log(`💓 Keep-alive target: ${SELF_URL} (${SELF_URL.startsWith('https') ? 'https module' : 'http module'})`);
 });
