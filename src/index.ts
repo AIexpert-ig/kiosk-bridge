@@ -59,7 +59,7 @@ async function runHTTP(): Promise<void> {
   // ─── SSE Transport Support ──────────────────────────────────
   let sseTransport: SSEServerTransport | null = null;
 
-  app.get("/sse", async (req: Request, res: Response) => {
+  app.get("/sse", async (_req: Request, res: Response) => {
     sseTransport = new SSEServerTransport("/message", res);
     await server.connect(sseTransport);
   });
