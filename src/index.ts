@@ -8,7 +8,7 @@
 // ============================================================
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocl/sdk/server/streamableHttp.js";
+import * as streamableHttp from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express, { Request, Response } from "express";
@@ -32,7 +32,7 @@ registerLogKioskEvent(server);
 
 async function runHTTP(): Promise<void> {
   const app = express();
-  
+
   // MCP Health check endpoint
   app.get("/health", (_req: Request, res: Response) => {
     res.json({
@@ -45,7 +45,7 @@ async function runHTTP(): Promise<void> {
 
   // MCP endpoint — one transport instance per request (stateless)
   app.post("/mcp", express.json(), async (req: Request, res: Response) => {
-    const transport = new StreamableHTTPServerTransport({
+    const transport = new streamableHttp.StreamableHTTPServerTransport({
       sessionIdGenerator: undefined, // stateless mode
       enableJsonResponse: true,
     });
