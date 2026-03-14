@@ -14,6 +14,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const mcp_js_1 = require("@modelcontextprotocol/sdk/server/mcp.js");
 const streamableHttp_js_1 = require("@modelcontextprotocol/sdk/server/streamableHttp.js");
 const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
+const sse_js_1 = require("@modelcontextprotocol/sdk/server/sse.js");
 const express_1 = __importDefault(require("express"));
 const constants_js_1 = require("./constants.js");
 const updateKioskView_js_1 = require("./tools/updateKioskView.js");
@@ -29,8 +30,7 @@ const server = new mcp_js_1.McpServer({
 // ─── Transport: Streamable HTTP (Render / remote) ─────────────
 async function runHTTP() {
     const app = (0, express_1.default)();
-    app.use(express_1.default.json());
-    // Health check endpoint — used by Render's health probe
+    // MCP Health check endpoint
     app.get("/health", (_req, res) => {
         res.json({
             status: "ok",
@@ -40,7 +40,7 @@ async function runHTTP() {
         });
     });
     // MCP endpoint — one transport instance per request (stateless)
-    app.post("/mcp", async (req, res) => {
+    app.post("/mcp", express_1.default.json(), async (req, res) => {
         const transport = new streamableHttp_js_1.StreamableHTTPServerTransport({
             sessionIdGenerator: undefined, // stateless mode
             enableJsonResponse: true,
@@ -48,6 +48,19 @@ async function runHTTP() {
         res.on("close", () => transport.close());
         await server.connect(transport);
         await transport.handleRequest(req, res, req.body);
+    });
+    // ─── SSE Transport Support ──────────────────────────────────
+    let sseTransport = null;
+    app.get("/sse", async (req, res) => {
+        sseTransport = new sse_js_1.SSEServerTransport("/message", res);
+        await server.connect(sseTransport);
+    });
+    app.post("/message", express_1.default.json(), async (req, res) => {
+        if (!sseTransport) {
+            res.status(400).send("No active SSE connection");
+            return;
+        }
+        await sseTransport.handlePostMessage(req, res);
     });
     app.listen(constants_js_1.PORT, () => {
         console.error(`[KioskOrchestrator] MCP server running on http://localhost:${constants_js_1.PORT}/mcp`);

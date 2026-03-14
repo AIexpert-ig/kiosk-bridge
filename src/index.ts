@@ -10,6 +10,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express, { Request, Response } from "express";
 
 import { SERVER_NAME, SERVER_VERSION, PORT } from "./constants.js";
@@ -31,9 +32,8 @@ registerLogKioskEvent(server);
 
 async function runHTTP(): Promise<void> {
   const app = express();
-  app.use(express.json());
-
-  // Health check endpoint — used by Render's health probe
+  
+  // MCP Health check endpoint
   app.get("/health", (_req: Request, res: Response) => {
     res.json({
       status: "ok",
@@ -44,7 +44,7 @@ async function runHTTP(): Promise<void> {
   });
 
   // MCP endpoint — one transport instance per request (stateless)
-  app.post("/mcp", async (req: Request, res: Response) => {
+  app.post("/mcp", express.json(), async (req: Request, res: Response) => {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined, // stateless mode
       enableJsonResponse: true,
@@ -54,6 +54,22 @@ async function runHTTP(): Promise<void> {
 
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
+  });
+
+  // ─── SSE Transport Support ──────────────────────────────────
+  let sseTransport: SSEServerTransport | null = null;
+
+  app.get("/sse", async (req: Request, res: Response) => {
+    sseTransport = new SSEServerTransport("/message", res);
+    await server.connect(sseTransport);
+  });
+
+  app.post("/message", express.json(), async (req: Request, res: Response) => {
+    if (!sseTransport) {
+      res.status(400).send("No active SSE connection");
+      return;
+    }
+    await sseTransport.handlePostMessage(req, res);
   });
 
   app.listen(PORT, () => {
