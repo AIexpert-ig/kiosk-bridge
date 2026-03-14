@@ -12,7 +12,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import express, { Request, Response } from "express";
 
-import { SERVER_NAME, SERVER_VERSION, HTTP_PORT } from "./constants.js";
+import { SERVER_NAME, SERVER_VERSION, PORT } from "./constants.js";
 import { registerUpdateKioskView } from "./tools/updateKioskView.js";
 import { registerLogKioskEvent } from "./tools/logKioskEvent.js";
 
@@ -56,12 +56,12 @@ async function runHTTP(): Promise<void> {
     await transport.handleRequest(req, res, req.body);
   });
 
-  app.listen(HTTP_PORT, () => {
+  app.listen(PORT, () => {
     console.error(
-      `[KioskOrchestrator] MCP server running on http://localhost:${HTTP_PORT}/mcp`
+      `[KioskOrchestrator] MCP server running on http://localhost:${PORT}/mcp`
     );
     console.error(
-      `[KioskOrchestrator] Health check: http://localhost:${HTTP_PORT}/health`
+      `[KioskOrchestrator] Health check: http://localhost:${PORT}/health`
     );
   });
 }

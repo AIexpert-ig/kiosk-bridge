@@ -49,9 +49,9 @@ async function runHTTP() {
         await server.connect(transport);
         await transport.handleRequest(req, res, req.body);
     });
-    app.listen(constants_js_1.HTTP_PORT, () => {
-        console.error(`[KioskOrchestrator] MCP server running on http://localhost:${constants_js_1.HTTP_PORT}/mcp`);
-        console.error(`[KioskOrchestrator] Health check: http://localhost:${constants_js_1.HTTP_PORT}/health`);
+    app.listen(constants_js_1.PORT, () => {
+        console.error(`[KioskOrchestrator] MCP server running on http://localhost:${constants_js_1.PORT}/mcp`);
+        console.error(`[KioskOrchestrator] Health check: http://localhost:${constants_js_1.PORT}/health`);
     });
 }
 // ─── Transport: stdio (local dev / Claude Desktop) ───────────
