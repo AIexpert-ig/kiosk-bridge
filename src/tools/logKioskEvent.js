@@ -1,19 +1,16 @@
+"use strict";
 // ============================================================
 // kiosk-orchestrator-mcp | tools/logKioskEvent.ts
 // Dubai Luxury Kiosk — Tool: log_kiosk_event
 // ============================================================
-
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { dispatch } from "../services/wsBridge.js";
-import { LogKioskEventSchema } from "../schemas/kioskSchemas.js";
-import { KioskEventPayload, KioskEventResult } from "../types.js";
-
-export function registerLogKioskEvent(server: McpServer): void {
-  server.registerTool(
-    "log_kiosk_event",
-    {
-      title: "Log Kiosk Event",
-      description: `Record a guest interaction event from the Dubai luxury kiosk and forward it to the analytics bridge.
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.registerLogKioskEvent = registerLogKioskEvent;
+const wsBridge_js_1 = require("../wsBridge.js");
+const kioskSchemas_js_1 = require("../kioskSchemas.js");
+function registerLogKioskEvent(server) {
+    server.registerTool("log_kiosk_event", {
+        title: "Log Kiosk Event",
+        description: `Record a guest interaction event from the Dubai luxury kiosk and forward it to the analytics bridge.
 
 This tool dispatches a structured event payload through the WebSocket bridge. Events are consumed
 by the analytics pipeline on Render for real-time guest behavior tracking and preference modelling.
@@ -49,46 +46,40 @@ Examples:
 Error Handling:
   - Returns status "error" if the WS bridge is not connected or times out (5s)
   - Events with status "error" should be retried by the orchestrating agent`,
-      inputSchema: LogKioskEventSchema,
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: false,
-      },
-    },
-    async ({ eventType, duration, guestInterests }) => {
-      const timestamp = new Date().toISOString();
-
-      const payload: KioskEventPayload = {
-        event: "LOG_EVENT",
-        timestamp,
-        data: { eventType, duration, guestInterests },
-      };
-
-      const { confirmed, error: bridgeError } = await dispatch(payload);
-
-      const result: KioskEventResult = {
-        status: confirmed ? "dispatched" : "error",
-        eventType,
-        duration,
-        guestInterests,
-        timestamp,
-        bridgeConfirmed: confirmed,
-        message: confirmed
-          ? `Event logged → ${eventType} | Duration: ${duration}s | Interests: [${guestInterests.join(", ") || "none"}]`
-          : `Dispatch failed: ${bridgeError ?? "Unknown bridge error"}`,
-      };
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-        structuredContent: result,
-      };
-    }
-  );
+        inputSchema: kioskSchemas_js_1.LogKioskEventSchema,
+        annotations: {
+            readOnlyHint: false,
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: false,
+        },
+    }, async ({ eventType, duration, guestInterests }) => {
+        const timestamp = new Date().toISOString();
+        const payload = {
+            event: "LOG_EVENT",
+            timestamp,
+            data: { eventType, duration, guestInterests },
+        };
+        const { confirmed, error: bridgeError } = await (0, wsBridge_js_1.dispatch)(payload);
+        const result = {
+            status: confirmed ? "dispatched" : "error",
+            eventType,
+            duration,
+            guestInterests,
+            timestamp,
+            bridgeConfirmed: confirmed,
+            message: confirmed
+                ? `Event logged → ${eventType} | Duration: ${duration}s | Interests: [${guestInterests.join(", ") || "none"}]`
+                : `Dispatch failed: ${bridgeError ?? "Unknown bridge error"}`,
+        };
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: JSON.stringify(result, null, 2),
+                },
+            ],
+            structuredContent: result,
+        };
+    });
 }

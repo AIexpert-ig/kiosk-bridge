@@ -12,8 +12,8 @@ import {
   WS_BRIDGE_URL,
   WS_RECONNECT_INTERVAL_MS,
   WS_DISPATCH_TIMEOUT_MS,
-} from "../constants.js";
-import { KioskWSPayload } from "../types.js";
+} from "./constants.js";
+import { KioskWSPayload } from "./types.js";
 
 // ─── Bridge State ─────────────────────────────────────────────
 

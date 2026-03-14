@@ -24,8 +24,7 @@ export const UpdateKioskViewSchema = z
       .describe(
         "Visual theme to apply to the kiosk UI. 'luxury' = gold/dark palette, 'adventure' = vibrant/energetic palette."
       ),
-  })
-  .strict();
+  });
 
 export const LogKioskEventSchema = z
   .object({
@@ -56,8 +55,7 @@ export const LogKioskEventSchema = z
       .describe(
         "Tags representing what the guest engaged with. Examples: ['desert_safari', 'dhow_cruise', 'luxury_hotel']. Pass an empty array if no interests detected."
       ),
-  })
-  .strict();
+  });
 
 export type UpdateKioskViewInput = z.infer<typeof UpdateKioskViewSchema>;
 export type LogKioskEventInput = z.infer<typeof LogKioskEventSchema>;

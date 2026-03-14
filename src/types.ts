@@ -8,7 +8,7 @@ export type VibeType = "luxury" | "adventure";
 
 // ─── WebSocket Bridge Payloads ───────────────────────────────
 
-export interface KioskViewPayload {
+export type KioskViewPayload = {
   event: "UPDATE_VIEW";
   timestamp: string;
   data: {
@@ -16,9 +16,9 @@ export interface KioskViewPayload {
     tourID: string;
     vibe: VibeType;
   };
-}
+};
 
-export interface KioskEventPayload {
+export type KioskEventPayload = {
   event: "LOG_EVENT";
   timestamp: string;
   data: {
@@ -26,13 +26,13 @@ export interface KioskEventPayload {
     duration: number;
     guestInterests: string[];
   };
-}
+};
 
 export type KioskWSPayload = KioskViewPayload | KioskEventPayload;
 
 // ─── Tool Responses ──────────────────────────────────────────
 
-export interface KioskViewResult {
+export type KioskViewResult = {
   status: "dispatched" | "error";
   viewType: ViewType;
   tourID: string;
@@ -40,9 +40,9 @@ export interface KioskViewResult {
   timestamp: string;
   bridgeConfirmed: boolean;
   message: string;
-}
+};
 
-export interface KioskEventResult {
+export type KioskEventResult = {
   status: "dispatched" | "error";
   eventType: string;
   duration: number;
@@ -50,12 +50,12 @@ export interface KioskEventResult {
   timestamp: string;
   bridgeConfirmed: boolean;
   message: string;
-}
+};
 
 // ─── Bridge Config ────────────────────────────────────────────
 
-export interface WSBridgeConfig {
+export type WSBridgeConfig = {
   url: string;
   reconnectIntervalMs: number;
   timeoutMs: number;
-}
+};
