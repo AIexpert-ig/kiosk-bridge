@@ -2,91 +2,181 @@
 // Dubai Luxury Kiosk -- WebSocket Relay Bridge
 // relay.js  (CommonJS, no build step, runs directly on Render)
 //
-// Deploy as a SEPARATE Render Web Service from the MCP orchestrator:
+// Deploy as its own Render Web Service:
 //   Build Command:  npm install
 //   Start Command:  node relay.js
 //
 // Architecture:
 //   MCP Orchestrator --WS--> /ws  (this server)  --Socket.IO--> Kiosk UI
 //                       <-- ACK <------------------------------------------
+//
+// Env vars (set in Render Dashboard -> Environment):
+//   PORT              injected automatically by Render
+//   TELEGRAM_TOKEN    from @BotFather
+//   TELEGRAM_CHAT_ID  from @userinfobot
 // ============================================================
 
-const express = require('express');
-const http = require('http');
+const express    = require('express');
+const http       = require('http');
 const { Server } = require('socket.io');
-const WebSocket = require('ws');
+const WebSocket  = require('ws');
 
-const app = express();
+const app        = express();
 const httpServer = http.createServer(app);
 
+// -- Socket.IO -> Kiosk UI ---------------------------------------------------
 const io = new Server(httpServer, {
-    cors: { origin: '*', methods: ['GET', 'POST'] },
-    pingInterval: 25000,
-    pingTimeout: 60000,
+  cors: { origin: '*', methods: ['GET', 'POST'] },
+  pingInterval: 25000,
+  pingTimeout:  60000,
 });
 
 let kioskSocket = null;
 
-io.on('connection', function (socket) {
-    kioskSocket = socket;
-    console.log('[Relay] Kiosk connected --', socket.id);
-    socket.on('disconnect', function (reason) {
-        if (kioskSocket && kioskSocket.id === socket.id) kioskSocket = null;
-        console.log('[Relay] Kiosk disconnected --', reason);
-    });
+io.on('connection', function(socket) {
+  kioskSocket = socket;
+  console.log('[Relay] Kiosk connected --', socket.id);
+  socket.on('disconnect', function(reason) {
+    if (kioskSocket && kioskSocket.id === socket.id) kioskSocket = null;
+    console.log('[Relay] Kiosk disconnected --', reason);
+  });
 });
 
+// -- Telegram Alert ----------------------------------------------------------
+// Fires when an UPDATE_VIEW event is relayed to the kiosk.
+// Silent if env vars are missing (does not crash the relay).
+async function sendTelegramAlert(tourID, viewType, vibe) {
+  var token  = process.env.TELEGRAM_TOKEN;
+  var chatId = process.env.TELEGRAM_CHAT_ID;
+
+  if (!token || !chatId) {
+    console.log('[Relay] Telegram env vars not set -- skipping alert');
+    return;
+  }
+
+  var now = new Date().toLocaleString('en-AE', {
+    timeZone: 'Asia/Dubai',
+    day:      '2-digit',
+    month:    'short',
+    year:     'numeric',
+    hour:     '2-digit',
+    minute:   '2-digit',
+    hour12:   true,
+  });
+
+  var text = [
+    '\u{1F6A8} *New Kiosk Lead*',
+    '',
+    '\u{1F3C4} Tour: ' + (tourID  || 'Unknown'),
+    '\u{1F3AC} View: ' + (viewType || 'Unknown'),
+    '\u{1F308} Vibe: ' + (vibe     || 'standard'),
+    '\u{1F552} Time: ' + now,
+  ].join('\n');
+
+  try {
+    var url = 'https://api.telegram.org/bot' + token + '/sendMessage';
+    var res = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        chat_id:    chatId,
+        text:       text,
+        parse_mode: 'Markdown',
+      }),
+    });
+    var json = await res.json();
+    if (json.ok) {
+      console.log('[Relay] Telegram alert sent -- tour:', tourID);
+    } else {
+      console.warn('[Relay] Telegram API error:', json.description);
+    }
+  } catch (err) {
+    console.error('[Relay] Telegram fetch failed:', err.message);
+  }
+}
+
+// -- WebSocket /ws -> MCP Orchestrator ---------------------------------------
 const wss = new WebSocket.Server({ server: httpServer, path: '/ws' });
 
-wss.on('connection', function (ws, req) {
-    console.log('[Relay] MCP connected --', req.socket.remoteAddress);
+wss.on('connection', function(ws, req) {
+  console.log('[Relay] MCP connected --', req.socket.remoteAddress);
 
-    ws.on('message', function (raw) {
-        var payload;
-        try { payload = JSON.parse(raw.toString()); }
-        catch (e) { ws.send(JSON.stringify({ error: 'Invalid JSON' })); return; }
+  ws.on('message', function(raw) {
+    var payload;
+    try {
+      payload = JSON.parse(raw.toString());
+    } catch (e) {
+      ws.send(JSON.stringify({ error: 'Invalid JSON' }));
+      return;
+    }
 
-        console.log('[Relay] event:', payload.event);
+    console.log('[Relay] event:', payload.event);
 
-        if (!kioskSocket || !kioskSocket.connected) {
-            ws.send(JSON.stringify({ error: 'Kiosk not connected' })); return;
-        }
+    if (!kioskSocket || !kioskSocket.connected) {
+      ws.send(JSON.stringify({ error: 'Kiosk not connected' }));
+      return;
+    }
 
-        if (payload.event === 'UPDATE_VIEW') {
-            var d = payload.data || {};
-            kioskSocket.emit('COMMAND_UPDATE_UI', {
-                viewType: d.viewType || 'home',
-                tourName: d.tourID || '',
-                qrUrl: d.tourID ? 'https://rayna.com/book/' + encodeURIComponent(d.tourID) : 'https://rayna.com',
-                vibe: d.vibe || null,
-            });
-            ws.send(JSON.stringify({ ack: true }));
-        } else if (payload.event === 'LOG_EVENT') {
-            console.log('[Relay] LOG_EVENT:', JSON.stringify(payload.data));
-            ws.send(JSON.stringify({ ack: true }));
-        } else {
-            ws.send(JSON.stringify({ error: 'Unknown event: ' + payload.event }));
-        }
-    });
+    if (payload.event === 'UPDATE_VIEW') {
+      var d        = payload.data || {};
+      var viewType = d.viewType || 'home';
+      var tourID   = d.tourID   || '';
+      var vibe     = d.vibe     || null;
 
-    ws.on('close', function (code) { console.log('[Relay] MCP disconnected -- code:', code); });
-    ws.on('error', function (err) { console.error('[Relay] WS error:', err.message); });
+      var qrUrl = tourID
+        ? 'https://rayna.com/book/' + encodeURIComponent(tourID)
+        : 'https://rayna.com';
+
+      // 1. Relay to kiosk
+      kioskSocket.emit('COMMAND_UPDATE_UI', {
+        viewType: viewType,
+        tourName: tourID,
+        qrUrl:    qrUrl,
+        vibe:     vibe,
+      });
+
+      // 2. Fire Telegram alert (non-blocking)
+      sendTelegramAlert(tourID, viewType, vibe);
+
+      ws.send(JSON.stringify({ ack: true }));
+      console.log('[Relay] Relayed COMMAND_UPDATE_UI -- tour:', tourID, 'vibe:', vibe);
+
+    } else if (payload.event === 'LOG_EVENT') {
+      console.log('[Relay] LOG_EVENT:', JSON.stringify(payload.data));
+      ws.send(JSON.stringify({ ack: true }));
+
+    } else {
+      ws.send(JSON.stringify({ error: 'Unknown event: ' + payload.event }));
+    }
+  });
+
+  ws.on('close', function(code) {
+    console.log('[Relay] MCP disconnected -- code:', code);
+  });
+  ws.on('error', function(err) {
+    console.error('[Relay] WS error:', err.message);
+  });
 });
 
-app.get('/health', function (_req, res) {
-    res.json({
-        status: 'ok', service: 'kiosk-relay-bridge',
-        kioskConnected: !!(kioskSocket && kioskSocket.connected),
-        mcpClients: wss.clients.size,
-        timestamp: new Date().toISOString(),
-    });
+// -- Health endpoint ---------------------------------------------------------
+app.get('/health', function(_req, res) {
+  res.json({
+    status:          'ok',
+    service:         'kiosk-relay-bridge',
+    kioskConnected:  !!(kioskSocket && kioskSocket.connected),
+    mcpClients:      wss.clients.size,
+    telegramEnabled: !!(process.env.TELEGRAM_TOKEN && process.env.TELEGRAM_CHAT_ID),
+    timestamp:       new Date().toISOString(),
+  });
 });
 
-app.get('/', function (_req, res) {
-    res.json({ service: 'Dubai Kiosk Relay Bridge', status: 'online' });
+app.get('/', function(_req, res) {
+  res.json({ service: 'Dubai Kiosk Relay Bridge', status: 'online' });
 });
 
+// -- Boot --------------------------------------------------------------------
 var PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, function () {
-    console.log('[Relay] Live on port', PORT);
+httpServer.listen(PORT, function() {
+  console.log('[Relay] Live on port', PORT);
+  console.log('[Relay]   Telegram alerts:', (process.env.TELEGRAM_TOKEN ? 'ENABLED' : 'DISABLED -- set TELEGRAM_TOKEN + TELEGRAM_CHAT_ID'));
 });
