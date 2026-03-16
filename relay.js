@@ -40,6 +40,39 @@ io.on('connection', function(socket) {
     if (kioskSocket && kioskSocket.id === socket.id) kioskSocket = null;
     console.log('[Relay] Kiosk disconnected --', reason);
   });
+
+  socket.on('BOOKING_CONFIRMED', function(data) {
+    console.log('[Relay] BOOKING_CONFIRMED:', data.guest, '-', data.tourName);
+    
+    var token  = process.env.TELEGRAM_TOKEN;
+    var chatId = process.env.TELEGRAM_CHAT_ID;
+    if (!token || !chatId) return;
+
+    var now = new Date().toLocaleString('en-AE', {
+      timeZone: 'Asia/Dubai', day: '2-digit', month: 'short',
+      year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true,
+    });
+
+    var text = [
+      '\uD83D\uDEA8 *New Kiosk Booking*',
+      '',
+      '\uD83D\uDC64 Guest: ' + (data.guest    || 'Unknown'),
+      '\uD83C\uDFC4 Tour:  ' + (data.tourName || 'Unknown'),
+      '\uD83D\uDDD3 Date:  ' + (data.date     || 'Not specified'),
+      '\uD83D\uDD52 Time:  ' + now,
+    ].join('\n');
+
+    fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'Markdown' }),
+    }).then(function(r) { return r.json(); }).then(function(j) {
+      console.log('[Relay] Telegram booking alert:', j.ok ? 'sent' : j.description);
+    }).catch(function(e) {
+      console.error('[Relay] Telegram error:', e.message);
+    });
+  });
+});
 });
 
 // -- Telegram Alert ----------------------------------------------------------
