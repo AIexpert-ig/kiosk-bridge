@@ -107,7 +107,7 @@ async function dispatchNotifications(data, source) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        from:    'kiosk@dubaikiosk.ai',
+        from:    'onboarding@resend.dev',
         to:      emailTo,
         subject: 'Booking: ' + tour + ' - ' + guest,
         html:    emailHtml
