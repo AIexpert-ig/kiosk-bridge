@@ -29,7 +29,7 @@ io.on('connection', function(socket) {
   });
 
   socket.on('BOOKING_CONFIRMED', async function(data) {
-    console.log('[Relay] BOOKING_CONFIRMED via socket:', JSON.stringify(data));
+    console.log('[Relay] Raw data received:', JSON.stringify(data));
     await dispatchNotifications(data, 'voice-ai');
   });
 });
