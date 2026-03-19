@@ -1,176 +1,76 @@
-# Kiosk Orchestrator MCP Server
+# Kiosk Bridge v2.0.1 — Multimodal Digital Concierge
 
-**Dubai Luxury Travel Kiosk — Programmatic UI & Booking State Control**
+**Travel Expert™ | The AI Concierge**
 
-MCP server that allows Claude (or any MCP client) to control the kiosk display and log guest interactions via a WebSocket bridge hosted on Render.
-
----
+Voice-driven AI concierge kiosk for Dubai hospitality. Vapi handles voice. This bridge routes visual commands to a React frontend via Socket.io.
 
 ## Architecture
 
 ```
-Claude / MCP Client
-       │
-       │  MCP (Streamable HTTP or stdio)
-       ▼
-kiosk-orchestrator-mcp-server
-       │
-       │  WebSocket (persistent, auto-reconnecting)
-       ▼
-Render WebSocket Bridge  ──►  Kiosk UI Renderer
+Guest speaks → Vapi (voice + LLM) → POST /vapi/function-call → relay.js
+                                                                    │
+                                                          Socket.io │
+                                                                    ▼
+                                                          Kiosk Browser
+                                                    (KioskUIController.jsx)
 ```
 
----
+## What It Does
 
-## Tools
+| Tool | Socket Event | Frontend Result |
+|------|-------------|-----------------|
+| `show_attraction` | `SHOW_ATTRACTION` | Animated card with image/video/facts + pricing |
+| `show_menu` | `SHOW_MENU` | Browsable grid (8 tours, 6 restaurants, 6 activities, 5 transfers) |
+| `set_mood` | `SET_MOOD` | 600ms CSS theme transition across 5 mood palettes |
+| `avatar_state` | `AVATAR_STATE` | Avatar expression + gesture update |
+| `send_booking_to_human` | `BOOKING_CONFIRMED` | Telegram/Email/WhatsApp notifications |
 
-### `update_kiosk_view`
-Switch the active screen on the kiosk.
+## Files
 
-| Parameter | Type | Values |
-|-----------|------|--------|
-| `viewType` | string | `'home'` \| `'tour_details'` \| `'booking_qr'` |
-| `tourID` | string | Any tour identifier (or `''` for home) |
-| `vibe` | string | `'luxury'` \| `'adventure'` |
+| File | Purpose | Deploy To |
+|------|---------|-----------|
+| `relay.js` | Bridge server — routes Vapi tools to kiosk | Render |
+| `KioskUIController.jsx` | React UI layer — cards, grids, mood sync | GitHub Pages |
+| `kiosk-multimodal.css` | Mood-driven styles, animations, layout | GitHub Pages |
+| `vapi-tool-schemas.json` | Tool definitions — paste into Vapi dashboard | Vapi |
+| `package.json` | Node.js dependencies | Render |
+| `INTEGRATION.md` | Step-by-step integration guide | Reference |
 
-### `log_kiosk_event`
-Record a guest interaction event to the analytics bridge.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `eventType` | string | e.g. `'tour_viewed'`, `'qr_scanned'`, `'idle_timeout'` |
-| `duration` | integer | Seconds (0 for instant events) |
-| `guestInterests` | string[] | Interest tags e.g. `['desert_safari', 'dhow_cruise']` |
-
----
-
-## Setup
-
-### 1. Install Dependencies
+## Deploy
 
 ```bash
-npm install
+# 1. Push to Render (auto-deploys from main)
+git add -A
+git commit -m "v2.0.1-finalized: multimodal concierge"
+git push origin main
+
+# 2. Verify
+curl https://kiosk-bridge.onrender.com/health
+# → { "version": "2.0.1-finalized", "registries": { "attractions": 5, "menu_types": 4, "moods": 5 } }
+
+# 3. Add tool schemas to Vapi Dashboard
+# Assistant → Functions → paste each tool from vapi-tool-schemas.json
+# Server URL: https://kiosk-bridge.onrender.com/vapi/function-call
 ```
 
-### 2. Configure Environment
+## Mood Themes
 
-Create a `.env` file or set environment variables:
+| Mood | Primary | Trigger |
+|------|---------|---------|
+| Gold | `#C5A355` | Luxury, default |
+| Blue | `#4FC3F7` | Ocean, spa, calm |
+| Amber | `#FFB74D` | Desert, warmth |
+| Emerald | `#66BB6A` | Nature, parks |
+| Coral | `#FF7043` | Beach, sunset |
 
-```bash
-# Required: Your Render WebSocket bridge URL
-WS_BRIDGE_URL=wss://your-kiosk-bridge.onrender.com/ws
+## Safety Features
 
-# Optional: Transport mode (default: stdio)
-TRANSPORT=http
-
-# Optional: HTTP port (default: 3000)
-PORT=3000
-```
-
-### 3. Build
-
-```bash
-npm run build
-```
-
-### 4. Run
-
-**HTTP mode (Render / remote deployment):**
-```bash
-TRANSPORT=http WS_BRIDGE_URL=wss://your-bridge.onrender.com/ws npm start
-```
-
-**stdio mode (Claude Desktop / local dev):**
-```bash
-WS_BRIDGE_URL=wss://your-bridge.onrender.com/ws npm start
-```
+- **Mood transition guard**: 600ms primary + 1200ms hard kill prevents stuck CSS overlay
+- **Connection drop recovery**: Clears all timers, resets to IDLE in 10s, re-syncs on reconnect
+- **Asset preloader**: 5 WebP images cached on mount, 5 MP4 videos preloaded with `fetchpriority="low"`
+- **Auto-reset**: Cards dismiss after 45s (attractions) or 60s (menus) of inactivity
+- **Category sanitization**: Empty strings, whitespace, and case mismatches handled server-side
 
 ---
 
-## Claude Desktop Config
-
-Add to `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "kiosk-orchestrator": {
-      "command": "node",
-      "args": ["/path/to/kiosk-orchestrator-mcp/dist/index.js"],
-      "env": {
-        "WS_BRIDGE_URL": "wss://your-kiosk-bridge.onrender.com/ws"
-      }
-    }
-  }
-}
-```
-
----
-
-## WebSocket Bridge Protocol
-
-The server expects your Render bridge to send ACK messages in this format:
-
-```json
-{ "ack": true }
-```
-
-Or on error:
-
-```json
-{ "error": "Descriptive error message" }
-```
-
-### Outbound Payload Format
-
-**`UPDATE_VIEW` payload:**
-```json
-{
-  "event": "UPDATE_VIEW",
-  "timestamp": "2025-01-15T10:30:00.000Z",
-  "data": {
-    "viewType": "tour_details",
-    "tourID": "TOUR-DSF-001",
-    "vibe": "luxury"
-  }
-}
-```
-
-**`LOG_EVENT` payload:**
-```json
-{
-  "event": "LOG_EVENT",
-  "timestamp": "2025-01-15T10:30:05.000Z",
-  "data": {
-    "eventType": "tour_viewed",
-    "duration": 45,
-    "guestInterests": ["desert_safari", "luxury_hotel"]
-  }
-}
-```
-
----
-
-## Project Structure
-
-```
-kiosk-orchestrator-mcp/
-├── src/
-│   ├── index.ts                  # Entry point, transport selection
-│   ├── types.ts                  # Shared TypeScript interfaces
-│   ├── constants.ts              # Environment-driven config
-│   ├── services/
-│   │   └── wsBridge.ts          # Persistent WS client + dispatch()
-│   ├── schemas/
-│   │   └── kioskSchemas.ts      # Zod validation schemas
-│   └── tools/
-│       ├── updateKioskView.ts   # update_kiosk_view tool
-│       └── logKioskEvent.ts     # log_kiosk_event tool
-├── package.json
-├── tsconfig.json
-└── README.md
-```
-
----
-
-*Travel Expert™ | The AI Concierge — Luxury Travel | Storytelling | AI-Optimized Experiences™*
+*Travel Expert™ | Luxury Travel · Storytelling · AI-Optimized Experiences™*
