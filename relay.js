@@ -125,17 +125,26 @@ async function sendTelegram(data) {
 }
 
 function formatBookingMessage(data) {
+    // Normalise — kiosk emits: guest, tourName, date, pax
+    const guest  = data.guest    || data.guest_name  || "N/A";
+    const tour   = data.tourName || data.tour_name   || "N/A";
+    const date   = data.date     || "N/A";
+    const pax    = data.pax      || data.guest_count || "N/A";
+    const dubaiTime = new Date().toLocaleString("en-GB", {
+        timeZone: "Asia/Dubai",
+        day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit"
+    });
     return [
-        `🏨 <b>New Booking Request</b>`,
-        ``,
-        `<b>Guest:</b> ${data.guest_name || "N/A"}`,
-        `<b>Tour:</b> ${data.tour_name || "N/A"}`,
-        `<b>Date:</b> ${data.date || "N/A"}`,
-        `<b>Guests:</b> ${data.guest_count || "N/A"}`,
-        `<b>Contact:</b> ${data.contact || "N/A"}`,
-        `<b>Notes:</b> ${data.notes || "None"}`,
-        ``,
-        `⏰ ${new Date().toISOString()}`,
+        "\u{1F6A8} <b>New Kiosk Booking</b>",
+        "",
+        "\u{1F464} <b>Guest:</b>  " + guest,
+        "\u{1F3C4} <b>Tour:</b>   " + tour,
+        "\u{1F5D3} <b>Date:</b>   " + date,
+        "\u{1F465} <b>Pax:</b>    " + pax,
+        "\u{1F50D} <b>Source:</b> voice-ai",
+        "",
+        "\u23F0 " + dubaiTime + " (Dubai)",
     ].join("\n");
 }
 
@@ -561,20 +570,37 @@ io.on("connection", (socket) => {
     // ── PRESERVED: Booking Confirmation ─────────────────────
     socket.on("BOOKING_CONFIRMED", async (data) => {
         console.log("[BOOKING]", JSON.stringify(data));
+
+        // Ghost booking guard
+        const GHOSTS = ["unknown", "not specified", "[tour name]", ""];
+        const isEmpty = (v) => GHOSTS.includes(String(v || "").toLowerCase().trim());
+        const _g = data.guest    || data.guest_name  || "";
+        const _t = data.tourName || data.tour_name   || "";
+        const _d = data.date     || "";
+        const _p = data.pax      || data.guest_count || "";
+        const emptyCount = [_g, _t, _d, _p].filter(isEmpty).length;
+
+        if (emptyCount >= 3) {
+            const reason = (_t && !isEmpty(_t)) ? "DROPOFF_AFTER_INTENT" : "DATA_VOID";
+            console.warn("[GHOST BOOKING] Suppressed:", reason, "| empty:", emptyCount, "| data:", JSON.stringify(data));
+            socket.emit("BOOKING_NOTIFICATION_SENT", { success: false, suppressed: true, reason: reason });
+            return;
+        }
+        if (emptyCount > 0) {
+            console.warn("[PARTIAL BOOKING]", emptyCount, "field(s) missing");
+            if (isEmpty(_g)) data.guest    = "REQUIRES FOLLOW-UP";
+            if (isEmpty(_t)) data.tourName = "REQUIRES FOLLOW-UP";
+            if (isEmpty(_d)) data.date     = "REQUIRES FOLLOW-UP";
+            if (isEmpty(_p)) data.pax      = "REQUIRES FOLLOW-UP";
+        }
+
         try {
             await dispatchNotifications(data);
-            socket.emit("BOOKING_NOTIFICATION_SENT", {
-                success: true,
-                timestamp: Date.now(),
-            });
+            socket.emit("BOOKING_NOTIFICATION_SENT", { success: true, timestamp: Date.now(), partial: emptyCount > 0 });
         } catch (err) {
             console.error("[BOOKING ERROR]", err);
-            socket.emit("BOOKING_NOTIFICATION_SENT", {
-                success: false,
-                error: err.message,
-            });
-        }
-    });
+            socket.emit("BOOKING_NOTIFICATION_SENT", { success: false, error: err.message });
+        }});
 
     // ── Kiosk requests its initial state ───────────────
     socket.on("REQUEST_STATE", () => {
