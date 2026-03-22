@@ -27,9 +27,10 @@ const io = new Server(server, {
         origin: "*",
         methods: ["GET", "POST"],
     },
-    pingTimeout: 60000,
-    pingInterval: 25000,
-    transports: ["websocket", "polling"],
+    pingTimeout: 120000,      // increased: Dubai hotel WiFi has higher latency
+    pingInterval: 30000,      // relaxed: reduces heartbeat pressure
+    connectTimeout: 45000,    // new: allow slow initial connections
+    transports: ["websocket"], // polling removed: was causing ECONNRESET overhead
 });
 
 app.use(express.json());
@@ -52,15 +53,30 @@ app.get("/health", (req, res) => {
 // ── Self-Ping Keep-Alive (PRESERVED — uses https) ────────
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
 if (RENDER_URL) {
-    setInterval(() => {
-        https
-            .get(`${RENDER_URL}/health`, (res) => {
-                console.log(`[SELF-PING] ${res.statusCode}`);
-            })
-            .on("error", (err) => {
-                console.error(`[SELF-PING] Failed: ${err.message}`);
-            });
-    }, 4 * 60 * 1000);
+  // Hardened self-ping: try/catch + ECONNRESET retry + request timeout
+  const selfPing = () => {
+    try {
+      const req = https.get(`${RENDER_URL}/health`, (res) => {
+        console.log(`[SELF-PING] ${res.statusCode}`);
+        res.resume(); // consume response body to free the socket
+      });
+      req.on("error", (err) => {
+        if (err.code === "ECONNRESET") {
+          console.warn("[SELF-PING] ECONNRESET — retrying in 5s");
+          setTimeout(selfPing, 5000);
+        } else {
+          console.error(`[SELF-PING] ${err.code} — ${err.message}`);
+        }
+      });
+      req.setTimeout(10000, () => {
+        req.destroy();
+        console.warn("[SELF-PING] Timeout — request destroyed");
+      });
+    } catch (err) {
+      console.error("[SELF-PING] Caught exception:", err.message);
+    }
+  };
+  setInterval(selfPing, 4 * 60 * 1000);
 }
 
 // ── Notification Dispatch (PRESERVED) ─────────────────────
@@ -564,8 +580,18 @@ const MOOD_THEMES = {
 // ============================================================
 // SOCKET.IO CONNECTION HANDLER
 // ============================================================
+// ── Server-level error handler — prevents crash on malformed frames ──────
+io.engine.on("connection_error", (err) => {
+  console.error(`[IO ENGINE] connection_error: ${err.code} — ${err.message}`);
+});
+
 io.on("connection", (socket) => {
     console.log(`[KIOSK] Connected: ${socket.id}`);
+
+  // Per-socket error handler — logs but never crashes the process
+  socket.on("error", (err) => {
+    console.error(`[SOCKET] Error on ${socket.id}: ${err.code || err.message}`);
+  });
 
     // ── PRESERVED: Booking Confirmation ─────────────────────
     socket.on("BOOKING_CONFIRMED", async (data) => {
@@ -616,8 +642,10 @@ io.on("connection", (socket) => {
     });
 
     socket.on("disconnect", (reason) => {
-        console.log(`[KIOSK] Disconnected: ${socket.id} (${reason})`);
-    });
+    const warnReasons = ["ping timeout", "transport close", "transport error"];
+    const logFn = warnReasons.includes(reason) ? console.warn : console.log;
+    logFn(`[KIOSK] Disconnected: ${socket.id} — reason: ${reason}`);
+  });
 });
 
 // ============================================================
